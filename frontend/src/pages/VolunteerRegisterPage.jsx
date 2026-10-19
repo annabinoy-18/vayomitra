@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, AssistanceApi } from "../api/client.js";
@@ -12,6 +13,7 @@ import {
 export default function VolunteerRegisterPage() {
   const navigate = useNavigate();
   const [types, setTypes] = useState([]);
+
   const [typesError, setTypesError] = useState("");
   const [typesLoading, setTypesLoading] = useState(true);
 
@@ -55,7 +57,13 @@ export default function VolunteerRegisterPage() {
   }
 
   useEffect(() => {
+
     loadTypes();
+=======
+    AssistanceApi.types()
+      .then(setTypes)
+      .catch(() => setTypes([]));
+
   }, []);
 
   function toggleType(code) {
@@ -110,7 +118,11 @@ export default function VolunteerRegisterPage() {
         "Registration successful. After login, upload your 10th and qualification certificates."
       );
 
+
       setTimeout(() => navigate("/login?role=VOLUNTEER"), 800);
+
+      setTimeout(() => navigate("/login"), 800);
+
     } catch (error) {
       form.setError(error.message);
       form.setErrors(error.fields || {});
@@ -255,13 +267,19 @@ export default function VolunteerRegisterPage() {
           </Field>
 
           <div className="grid two registration-grid">
+
             <Field label="Locality" error={form.errors.locality}>
+            <Field label="Locality">
+
               <input
                 name="locality"
                 placeholder="Enter your locality"
                 value={form.values.locality}
                 onChange={form.onChange}
+
                 required
+
+
               />
             </Field>
 
@@ -386,7 +404,36 @@ export default function VolunteerRegisterPage() {
         <section className="registration-section">
           <h2>Certificates</h2>
           <p className="registration-section-description">
+
             Upload your 10th-standard, qualification, and any required driving-licence documents from your volunteer dashboard after registration.
+
+            Select the relevant documents from your device. Accepted
+            formats: PDF, JPG, and PNG.
+          </p>
+
+          <Field label="Educational qualification certificate">
+            <input
+              className="registration-file-input"
+              type="file"
+              name="EducationCertificate"
+              accept=".pdf,.jpg,.jpeg,.png"
+            />
+          </Field>
+
+          <Field label="Experience certificate (optional)">
+            <input
+              className="registration-file-input"
+              type="file"
+              name="experienceCertificate"
+              accept=".pdf,.jpg,.jpeg,.png"
+            />
+          </Field>
+
+          <p className="registration-help">
+            Note: These file selections are not included in the current
+            JSON registration request. Upload functionality needs to be
+            connected to the backend separately.
+
           </p>
         </section>
 
@@ -456,6 +503,7 @@ export default function VolunteerRegisterPage() {
               </div>
             ) : (
               <p className="registration-help">
+
                 {typesLoading ? "Loading assistance types..." : "Assistance types are unavailable."}
               </p>
             )}
@@ -468,6 +516,13 @@ export default function VolunteerRegisterPage() {
               </button>
             </div>
           ) : null}
+
+                Assistance options could not be loaded. Please try again
+                later.
+              </p>
+            )}
+          </Field>
+
         </section>
 
         <section className="registration-section">
@@ -515,6 +570,16 @@ export default function VolunteerRegisterPage() {
                 />
               </Field>
 
+
+=======
+              <Field label="Driving licence certificate">
+                <input
+                  className="registration-file-input"
+                  type="file"
+                  name="drivingLicenceCertificate"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                />
+              </Field>
             </div>
           )}
         </section>
@@ -522,7 +587,9 @@ export default function VolunteerRegisterPage() {
         <div className="registration-actions">
           <button
             className="btn registration-submit"
+
             disabled={form.busy || typesLoading || types.length === 0}
+            disabled={form.busy}
             type="submit"
           >
             {form.busy

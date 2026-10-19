@@ -1,3 +1,4 @@
+
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
@@ -59,7 +60,7 @@ export default function ElderRegisterPage() {
         "Registration successful. You can log in now."
       );
 
-      setTimeout(() => navigate("/login?role=ELDER"), 700);
+          setTimeout(() => navigate("/login?role=ELDER"), 700);
     } catch (error) {
       form.setError(error.message);
       form.setErrors(error.fields || {});

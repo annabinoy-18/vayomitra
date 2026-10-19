@@ -5,12 +5,20 @@ import "../styles.css";
 
 export default function HomePage() {
   const { user } = useAuth();
-  const dashboard = user?.role === "ADMIN" ? "/admin"
-    : user?.role === "VOLUNTEER" ? "/volunteer"
-      : user ? "/elder" : null;
+
+  const dashboard =
+    user?.role === "ADMIN"
+      ? "/admin"
+      : user?.role === "VOLUNTEER"
+        ? "/volunteer"
+        : user
+          ? "/elder"
+          : null;
 
   return (
     <div className="home-page">
+
+    </div>
       <nav className="home-navbar">
         <Link to="/" className="home-logo">
           Vayomitra
@@ -32,6 +40,13 @@ export default function HomePage() {
               <Link to="/register/volunteer" className="register-button">Join as Volunteer</Link>
             </>
           )}
+          <Link to="/login" className="login-link">
+            Log in
+          </Link>
+          <Link to="/register/volunteer" className="register-button">
+            Join as Volunteer
+          </Link>
+
         </div>
       </nav>
 
@@ -76,8 +91,13 @@ export default function HomePage() {
           <div className="hero-image-decoration"></div>
 
           <img
+
             src="/love-care.jpg"
             alt="A caregiver bringing a warm drink to an older woman"
+
+            src="/love-care.png"
+            alt="An illustration representing love, care, and support"
+
             className="hero-image"
           />
 
@@ -157,6 +177,10 @@ export default function HomePage() {
       <footer className="home-footer">
         <p>♥ Vayomitra — Care, connection, and compassion.</p>
       </footer>
+
     </div>
+
+    </main>
+
   );
 }
