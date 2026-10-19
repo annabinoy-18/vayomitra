@@ -97,8 +97,21 @@ public final class ApiServer {
                 http.sendJson(exchange, 200, authService.me(user));
                 return;
             }
+            if ("GET".equals(method) && "/api/volunteers/me/matching-readiness".equals(path)) {
+                http.sendJson(exchange, 200, matchingService.volunteerReadiness(user));
+                return;
+            }
             if ("GET".equals(method) && "/api/volunteers/me/documents".equals(path)) {
                 http.sendJson(exchange, 200, documentService.listMine(user));
+                return;
+            }
+            if ("GET".equals(method) && "/api/elders/me/documents".equals(path)) {
+                http.sendJson(exchange, 200, documentService.listMine(user));
+                return;
+            }
+            if ("POST".equals(method) && "/api/elders/me/documents".equals(path)) {
+                byte[] body = http.readLimited(exchange.getRequestBody(), config.maxUploadBytes() + 4096);
+                http.sendJson(exchange, 201, documentService.uploadElder(user, Multipart.parse(http.header(exchange, "Content-Type"), body)));
                 return;
             }
             if ("POST".equals(method) && "/api/volunteers/me/documents".equals(path)) {
@@ -149,8 +162,15 @@ public final class ApiServer {
                     return;
                 }
                 if ("GET".equals(method) && "/matches".equals(rest)) {
+                    if (!user.isElder() && !user.isAdmin()) {
+                        throw ApiException.forbidden("Only the elder who created this request or an administrator can view its volunteer list.");
+                    }
                     requestService.get(user, requestId);
                     http.sendJson(exchange, 200, matchingService.listRecommendations(requestId));
+                    return;
+                }
+                if ("POST".equals(method) && "/matches/refresh".equals(rest)) {
+                    http.sendJson(exchange, 200, requestService.refreshMatches(user, requestId));
                     return;
                 }
                 if ("POST".equals(method) && "/assign".equals(rest)) {
@@ -211,23 +231,27 @@ public final class ApiServer {
 
     private ArrayNode assistanceTypes() {
         ArrayNode items = Jsons.MAPPER.createArrayNode();
-        addType(items, "TRANSPORTATION", "Transportation Assistance", "Help elders travel to hospitals, appointments, and other destinations.");
-        addType(items, "GROCERY_SUPPORT", "Grocery / Essential / Medicine Shopping", "Help purchase groceries, daily necessities, and medicines.");
-        addType(items, "TECHNOLOGY_SUPPORT", "Technology Support", "Help with phones, apps, video calls, and digital services.");
-        addType(items, "LONELINESS_SUPPORT", "Companionship / Loneliness Support", "Provide companionship, conversation, and social interaction.");
-        addType(items, "BOOKING_SUPPORT", "Booking Support", "Help book appointments, transport, tickets, and other services.");
-        addType(items, "HOME_NURSE_ASSISTANCE", "Home Nurse Assistance", "Help arrange appropriate nursing and home healthcare support.");
-        addType(items, "EMERGENCY_ASSISTANCE", "Emergency Assistance", "Help elders access appropriate urgent support and emergency services.");
-        addType(items, "PET_ASSISTANCE", "Pet Assistance", "Help with pet feeding, walking, and basic pet-care tasks.");
-        addType(items, "MINOR_HOME_MAINTENANCE", "Minor Home Maintenance", "Help with small household tasks and minor repairs.");
+        addType(items, "TRANSPORTATION", "Transportation Assistance", "Help elders travel to hospitals, appointments, and other destinations.", true, false, false);
+        addType(items, "GROCERY_SUPPORT", "Grocery / Essential / Medicine Shopping", "Help purchase groceries, daily necessities, and medicines.", false, false, false);
+        addType(items, "TECHNOLOGY_SUPPORT", "Technology Support", "Help with phones, apps, video calls, and digital services.", false, false, false);
+        addType(items, "LONELINESS_SUPPORT", "Companionship / Loneliness Support", "Provide companionship, conversation, and social interaction.", false, false, false);
+        addType(items, "BOOKING_SUPPORT", "Booking Support", "Help book appointments, transport, tickets, and other services.", false, false, false);
+        addType(items, "HOME_NURSE_ASSISTANCE", "Home Nurse Assistance", "Help arrange appropriate nursing and home healthcare support.", false, true, false);
+        addType(items, "EMERGENCY_ASSISTANCE", "Emergency Assistance", "Help elders access appropriate urgent support and emergency services.", false, false, true);
+        addType(items, "PET_ASSISTANCE", "Pet Assistance", "Help with pet feeding, walking, and basic pet-care tasks.", false, false, false);
+        addType(items, "MINOR_HOME_MAINTENANCE", "Minor Home Maintenance", "Help with small household tasks and minor repairs.", false, false, false);
         return items;
     }
 
-    private void addType(ArrayNode items, String code, String name, String description) {
+    private void addType(ArrayNode items, String code, String name, String description,
+                         boolean requiresDriving, boolean requiresHealthcareCertificate, boolean requiresFirstAidCertificate) {
         ObjectNode item = Jsons.object();
         item.put("code", code);
         item.put("displayName", name);
         item.put("description", description);
+        item.put("requiresDrivingLicence", requiresDriving);
+        item.put("requiresHealthcareCertificate", requiresHealthcareCertificate);
+        item.put("requiresFirstAidCertificate", requiresFirstAidCertificate);
         items.add(item);
     }
 }

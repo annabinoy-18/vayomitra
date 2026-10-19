@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.util.Locale;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,11 +39,11 @@ public final class AuthService {
     public ObjectNode registerElder(JsonNode body) throws SQLException {
         Validation v = new Validation();
         String fullName = Validation.text(body, "fullName");
-        String email = Validation.text(body, "email").toLowerCase();
-        String password = Validation.text(body, "password");
-        String confirm = Validation.text(body, "confirmPassword");
+        String email = Validation.text(body, "email").toLowerCase(Locale.ROOT);
+        String password = rawText(body, "password");
+        String confirm = rawText(body, "confirmPassword");
         String dobRaw = Validation.text(body, "dateOfBirth");
-        String gender = Validation.text(body, "gender").toUpperCase();
+        String gender = Validation.text(body, "gender").toUpperCase(Locale.ROOT);
         String phone = Validation.text(body, "phone");
         String address = Validation.text(body, "address");
         String locality = Validation.text(body, "locality");
@@ -113,6 +114,9 @@ public final class AuthService {
                 return Jsons.ok(data);
             } catch (RuntimeException | SQLException e) {
                 connection.rollback();
+                if (isDuplicateEmail(e)) {
+                    throw ApiException.conflict("An account with this email already exists.");
+                }
                 throw e;
             } finally {
                 connection.setAutoCommit(true);
@@ -123,11 +127,11 @@ public final class AuthService {
     public ObjectNode registerVolunteer(JsonNode body) throws SQLException {
         Validation v = new Validation();
         String fullName = Validation.text(body, "fullName");
-        String email = Validation.text(body, "email").toLowerCase();
-        String password = Validation.text(body, "password");
-        String confirm = Validation.text(body, "confirmPassword");
+        String email = Validation.text(body, "email").toLowerCase(Locale.ROOT);
+        String password = rawText(body, "password");
+        String confirm = rawText(body, "confirmPassword");
         String dobRaw = Validation.text(body, "dateOfBirth");
-        String gender = Validation.text(body, "gender").toUpperCase();
+        String gender = Validation.text(body, "gender").toUpperCase(Locale.ROOT);
         String phone = Validation.text(body, "phone");
         String address = Validation.text(body, "address");
         String locality = Validation.text(body, "locality");
@@ -267,6 +271,9 @@ public final class AuthService {
                 return Jsons.ok(data);
             } catch (RuntimeException | SQLException e) {
                 connection.rollback();
+                if (isDuplicateEmail(e)) {
+                    throw ApiException.conflict("An account with this email already exists.");
+                }
                 throw e;
             } finally {
                 connection.setAutoCommit(true);
@@ -275,9 +282,9 @@ public final class AuthService {
     }
 
     public ObjectNode login(JsonNode body) throws SQLException {
-        String email = Validation.text(body, "email").toLowerCase();
-        String password = Validation.text(body, "password");
-        String requestedRole = Validation.text(body, "role").toUpperCase();
+        String email = Validation.text(body, "email").toLowerCase(Locale.ROOT);
+        String password = rawText(body, "password");
+        String requestedRole = Validation.text(body, "role").toUpperCase(Locale.ROOT);
         if (email.isBlank() || password.isBlank()) {
             throw ApiException.unauthorized("Email and password are required.");
         }
@@ -504,6 +511,13 @@ public final class AuthService {
         }
     }
 
+    private boolean isDuplicateEmail(Exception error) {
+        return error instanceof SQLException sqlException
+                && "23505".equals(sqlException.getSQLState())
+                && sqlException.getMessage() != null
+                && sqlException.getMessage().contains("users_email_unique");
+    }
+
     private void insertAvailability(Connection connection, UUID volunteerId, int weekday, LocalTime start, LocalTime end)
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
@@ -537,6 +551,13 @@ public final class AuthService {
 
     private String defaultCountry(String country) {
         return country.isBlank() ? "India" : country;
+    }
+
+    private String rawText(JsonNode body, String field) {
+        if (body == null || body.path(field).isMissingNode() || body.path(field).isNull()) {
+            return "";
+        }
+        return body.path(field).asText("");
     }
 
     private int parseInt(String raw, int fallback) {

@@ -1,12 +1,23 @@
 import React from "react";
 
 export function Field({ label, error, children, hint }) {
+  const id = React.useId();
+  const isControl = React.isValidElement(children)
+    && ["input", "select", "textarea"].includes(children.type);
+  const control = isControl
+    ? React.cloneElement(children, {
+        id: children.props.id || id,
+        "aria-invalid": error ? true : undefined,
+        "aria-describedby": error ? `${id}-error` : undefined
+      })
+    : children;
+
   return (
     <div className="field">
-      <label>{label}</label>
-      {children}
+      <label htmlFor={isControl ? id : undefined}>{label}</label>
+      {control}
       {hint ? <div className="muted">{hint}</div> : null}
-      {error ? <div className="field-error">{error}</div> : null}
+      {error ? <div className="field-error" id={`${id}-error`}>{error}</div> : null}
     </div>
   );
 }
@@ -15,7 +26,7 @@ export function Alert({ type = "info", children }) {
   if (!children) {
     return null;
   }
-  return <div className={`alert ${type}`}>{children}</div>;
+  return <div className={`alert ${type}`} role={type === "error" ? "alert" : "status"}>{children}</div>;
 }
 
 export function useForm(initial) {
@@ -28,6 +39,12 @@ export function useForm(initial) {
   function onChange(event) {
     const { name, value, type, checked } = event.target;
     setValues((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
+    setErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   return { values, setValues, errors, setErrors, message, setMessage, error, setError, busy, setBusy, onChange };

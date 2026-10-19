@@ -49,6 +49,33 @@ export async function api(path, { method = "GET", body, headers = {}, isForm = f
   return payload.data;
 }
 
+export async function openAuthenticatedFile(path) {
+  const preview = window.open("about:blank", "_blank");
+  try {
+    const token = getToken();
+    const response = await fetch(path, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) {
+      const payload = await parseBody(response);
+      throw new Error(payload?.error?.message || "Could not open the document.");
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    if (preview) {
+      preview.location.replace(blobUrl);
+    } else {
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = "document";
+      link.click();
+    }
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  } catch (error) {
+    preview?.close();
+    throw error;
+  }
+}
+
 export const AssistanceApi = {
   types: () => api("/api/assistance-types"),
   health: () => api("/api/health")

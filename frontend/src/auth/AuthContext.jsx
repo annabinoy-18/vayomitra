@@ -7,7 +7,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  async function refresh() {
+  async function refresh({ throwOnError = false } = {}) {
     if (!getToken()) {
       setUser(null);
       setLoading(false);
@@ -16,9 +16,12 @@ export function AuthProvider({ children }) {
     try {
       const me = await api("/api/auth/me");
       setUser(me);
-    } catch {
+    } catch (error) {
       setToken(null);
       setUser(null);
+      if (throwOnError) {
+        throw error;
+      }
     } finally {
       setLoading(false);
     }
@@ -38,7 +41,13 @@ export function AuthProvider({ children }) {
           body: { email, password, role }
         });
         setToken(data.token);
-        await refresh();
+        try {
+          await refresh({ throwOnError: true });
+        } catch (error) {
+          setToken(null);
+          setUser(null);
+          throw error;
+        }
         return data;
       },
       async logout() {

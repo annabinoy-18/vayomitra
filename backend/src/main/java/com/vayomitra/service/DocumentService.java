@@ -27,8 +27,9 @@ public final class DocumentService {
     );
     private static final Set<String> VOLUNTEER_DOC_TYPES = Set.of(
             "TENTH_CERTIFICATE", "QUALIFICATION_CERTIFICATE", "DRIVING_LICENCE",
-            "HEALTHCARE_CERTIFICATE", "FIRST_AID_CERTIFICATE", "EXPERIENCE_CERTIFICATE","OTHER"
+            "HEALTHCARE_CERTIFICATE", "FIRST_AID_CERTIFICATE", "OTHER"
     );
+        private static final Set<String> ELDER_DOC_TYPES = Set.of("IDENTITY_PROOF", "OTHER");
     private final Database database;
     private final AuthService authService;
     private final AppConfig config;
@@ -83,8 +84,59 @@ public final class DocumentService {
         }
     }
 
+    public ObjectNode uploadElder(AuthUser user, Map<String, java.util.List<Multipart.Part>> parts) throws Exception {
+        if (!user.isElder()) {
+            throw ApiException.forbidden("Only elders can upload elder documents.");
+        }
+        String documentType = firstText(parts, "documentType").toUpperCase(Locale.ROOT);
+        Multipart.Part file = first(parts, "file");
+        if (!ELDER_DOC_TYPES.contains(documentType)) {
+            throw ApiException.badRequest("Unsupported document type.");
+        }
+        if (file == null || file.filename() == null || file.filename().isBlank()) {
+            throw ApiException.badRequest("A document file is required.");
+        }
+        validateFile(file);
+        try (Connection connection = database.connection()) {
+            UUID elderId = authService.elderId(connection, user.userId());
+            UUID documentId = UUID.randomUUID();
+            String stored = documentId + extension(file.filename());
+            Path dir = config.uploadDir().resolve("elders").resolve(elderId.toString());
+            Files.createDirectories(dir);
+            Path target = dir.resolve(stored);
+            Files.write(target, file.data());
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO elder_documents (
+                        id, elder_id, document_type, original_filename, stored_filename,
+                        content_type, file_size_bytes
+                    ) VALUES (?,?,?,?,?,?,?)
+                    """)) {
+                statement.setObject(1, documentId);
+                statement.setObject(2, elderId);
+                statement.setString(3, documentType);
+                statement.setString(4, safeFilename(file.filename()));
+                statement.setString(5, stored);
+                statement.setString(6, file.contentType());
+                statement.setInt(7, file.data().length);
+                statement.executeUpdate();
+            } catch (SQLException | RuntimeException error) {
+                Files.deleteIfExists(target);
+                throw error;
+            }
+            ObjectNode data = Jsons.object();
+            data.put("documentId", documentId.toString());
+            data.put("verificationStatus", "PENDING");
+            data.put("message", "Identity document uploaded and waiting for administrator verification.");
+            return Jsons.ok(data);
+        }
+    }
+
     public ObjectNode listMine(AuthUser user) throws SQLException {
         try (Connection connection = database.connection()) {
+            if (user.isElder()) {
+                UUID elderId = authService.elderId(connection, user.userId());
+                return Jsons.ok(listElderDocs(connection, elderId));
+            }
             if (user.isVolunteer()) {
                 UUID volunteerId = authService.volunteerId(connection, user.userId());
                 return Jsons.ok(listVolunteerDocs(connection, volunteerId));
@@ -96,12 +148,20 @@ public final class DocumentService {
     public FilePayload download(AuthUser user, UUID documentId) throws Exception {
         try (Connection connection = database.connection();
              PreparedStatement statement = connection.prepareStatement("""
-                     SELECT d.*, v.user_id
-                     FROM volunteer_documents d
-                     JOIN volunteers v ON v.id = d.volunteer_id
-                     WHERE d.id = ?
+                SELECT 'ELDER' AS owner_type, d.content_type, d.original_filename, d.stored_filename,
+                    d.elder_id AS owner_id, e.user_id
+                FROM elder_documents d
+                JOIN elders e ON e.id = d.elder_id
+                WHERE d.id = ?
+                UNION ALL
+                SELECT 'VOLUNTEER' AS owner_type, d.content_type, d.original_filename, d.stored_filename,
+                    d.volunteer_id AS owner_id, v.user_id
+                FROM volunteer_documents d
+                JOIN volunteers v ON v.id = d.volunteer_id
+                WHERE d.id = ?
                      """)) {
             statement.setObject(1, documentId);
+             statement.setObject(2, documentId);
             try (ResultSet rs = statement.executeQuery()) {
                 if (!rs.next()) {
                     throw ApiException.notFound("Document not found.");
@@ -110,10 +170,9 @@ public final class DocumentService {
                 if (!user.isAdmin() && !owner.equals(user.userId())) {
                     throw ApiException.forbidden("You cannot view another person's documents.");
                 }
-                Path path = config.uploadDir()
-                        .resolve("volunteers")
-                        .resolve(rs.getObject("volunteer_id", UUID.class).toString())
-                        .resolve(rs.getString("stored_filename"));
+                Path path = config.uploadDir().resolve(rs.getString("owner_type").toLowerCase(Locale.ROOT) + "s")
+                    .resolve(rs.getObject("owner_id", UUID.class).toString())
+                    .resolve(rs.getString("stored_filename"));
                 if (!Files.isRegularFile(path)) {
                     throw ApiException.notFound("Stored file is missing.");
                 }
@@ -126,19 +185,27 @@ public final class DocumentService {
         requireAdmin(user);
         try (Connection connection = database.connection();
              PreparedStatement statement = connection.prepareStatement("""
-                     SELECT d.id, d.document_type, d.original_filename, d.verification_status, d.created_at,
-                            v.full_name, u.email
+                    SELECT d.id, d.document_type, d.original_filename, d.verification_status, d.created_at,
+                        e.full_name, u.email, 'ELDER' AS owner_type
+                    FROM elder_documents d
+                    JOIN elders e ON e.id = d.elder_id
+                    JOIN users u ON u.id = e.user_id
+                    WHERE d.verification_status = 'PENDING'
+                    UNION ALL
+                    SELECT d.id, d.document_type, d.original_filename, d.verification_status, d.created_at,
+                        v.full_name, u.email, 'VOLUNTEER' AS owner_type
                      FROM volunteer_documents d
                      JOIN volunteers v ON v.id = d.volunteer_id
                      JOIN users u ON u.id = v.user_id
                      WHERE d.verification_status = 'PENDING'
-                     ORDER BY d.created_at ASC
+                     ORDER BY created_at ASC
                      """);
              ResultSet rs = statement.executeQuery()) {
             ArrayNode items = Jsons.MAPPER.createArrayNode();
             while (rs.next()) {
                 ObjectNode item = Jsons.object();
                 item.put("documentId", rs.getObject("id", UUID.class).toString());
+                item.put("ownerType", rs.getString("owner_type"));
                 item.put("documentType", rs.getString("document_type"));
                 item.put("originalFilename", rs.getString("original_filename"));
                 item.put("verificationStatus", rs.getString("verification_status"));
@@ -160,15 +227,28 @@ public final class DocumentService {
         try (Connection connection = database.connection()) {
             connection.setAutoCommit(false);
             try {
+                int updated;
                 try (PreparedStatement statement = connection.prepareStatement("""
-                        UPDATE volunteer_documents
+                        UPDATE elder_documents
                         SET verification_status = ?, reviewer_notes = ?
                         WHERE id = ?
                         """)) {
                     statement.setString(1, status);
                     statement.setString(2, notes);
                     statement.setObject(3, documentId);
-                    if (statement.executeUpdate() == 0) {
+                    updated = statement.executeUpdate();
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE volunteer_documents
+                        SET verification_status = ?, reviewer_notes = ?
+                        WHERE id = ? AND ? = 0
+                        """)) {
+                    statement.setString(1, status);
+                    statement.setString(2, notes);
+                    statement.setObject(3, documentId);
+                    statement.setInt(4, updated);
+                    updated += statement.executeUpdate();
+                    if (updated == 0) {
                         throw ApiException.notFound("Document not found.");
                     }
                 }
@@ -217,6 +297,28 @@ public final class DocumentService {
         return items;
     }
 
+    private ArrayNode listElderDocs(Connection connection, UUID elderId) throws SQLException {
+        ArrayNode items = Jsons.MAPPER.createArrayNode();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT id, document_type, original_filename, verification_status, reviewer_notes, created_at
+                FROM elder_documents WHERE elder_id = ? ORDER BY created_at DESC
+                """)) {
+            statement.setObject(1, elderId);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    ObjectNode item = Jsons.object();
+                    item.put("documentId", rs.getObject("id", UUID.class).toString());
+                    item.put("documentType", rs.getString("document_type"));
+                    item.put("originalFilename", rs.getString("original_filename"));
+                    item.put("verificationStatus", rs.getString("verification_status"));
+                    item.put("reviewerNotes", rs.getString("reviewer_notes"));
+                    items.add(item);
+                }
+            }
+        }
+        return items;
+    }
+
     private void linkCertificate(Connection connection, UUID volunteerId, UUID documentId, String documentType, String filename)
             throws SQLException {
         String certificateType = switch (documentType) {
@@ -225,7 +327,6 @@ public final class DocumentService {
             case "DRIVING_LICENCE" -> "DRIVING_LICENCE";
             case "HEALTHCARE_CERTIFICATE" -> "HEALTHCARE";
             case "FIRST_AID_CERTIFICATE" -> "FIRST_AID";
-            case "EXPERIENCE_CERTIFICATE" -> "EXPERIENCE";
             default -> "OTHER";
         };
         try (PreparedStatement statement = connection.prepareStatement("""

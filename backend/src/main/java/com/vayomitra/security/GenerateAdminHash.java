@@ -1,12 +1,10 @@
+package com.vayomitra.security;
 
-package com.vayomitra;
+public final class GenerateAdminHash {
+    private GenerateAdminHash() {
+    }
 
-import com.vayomitra.security.Passwords;
-
-public class GenerateAdminHash {
-    public static void main(String[] args) {
-        System.out.println(
-            Passwords.hash("Demo@12345", 10)
-        );
+    public static void main(String[] args) throws Exception {
+        AdminProvisioner.main(args);
     }
 }

@@ -19,6 +19,7 @@ import java.sql.Time;
 import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -41,7 +42,7 @@ public final class RequestService {
             throw ApiException.forbidden("Only elders can create assistance requests.");
         }
         Validation v = new Validation();
-        String type = Validation.text(body, "assistanceType").toUpperCase();
+        String type = Validation.text(body, "assistanceType").toUpperCase(Locale.ROOT);
         String title = Validation.text(body, "title");
         String description = Validation.text(body, "description");
         String dateRaw = Validation.text(body, "preferredDate");
@@ -72,11 +73,15 @@ public final class RequestService {
         if (!pin.isBlank()) {
             v.pin("pinCode", pin);
         }
+        boolean hasCoordinates = lat != null && lng != null;
+        if (!hasCoordinates && city.isBlank() && pin.isBlank()) {
+            v.errors().put("city", "Enter a city or PIN code, or share your location, so volunteers can be matched.");
+        }
         if (!Set.of("LOW", "NORMAL", "HIGH", "URGENT").contains(priority)) {
             v.errors().put("priority", "Priority must be LOW, NORMAL, HIGH, or URGENT.");
         }
         v.coordinates(lat, lng);
-        boolean requiresDriving = body.path("requiresDriving").asBoolean("TRANSPORTATION".equals(type));
+        boolean requiresDriving = body.path("requiresDriving").asBoolean(false) || "TRANSPORTATION".equals(type);
         v.throwIfInvalid();
 
         try (Connection connection = database.connection()) {
@@ -131,7 +136,9 @@ public final class RequestService {
             if (user.isElder()) {
                 UUID elderId = authService.elderId(connection, user.userId());
                 try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT r.*, a.status AS assignment_status, v.full_name AS volunteer_name
+                        SELECT r.*, a.status AS assignment_status, v.full_name AS volunteer_name,
+                               (SELECT COUNT(*) FROM match_recommendations m WHERE m.request_id = r.id)
+                                   AS eligible_volunteer_count
                         FROM assistance_requests r
                         LEFT JOIN volunteer_assignments a ON a.request_id = r.id AND a.status <> 'DECLINED'
                         LEFT JOIN volunteers v ON v.id = a.volunteer_id
@@ -180,6 +187,7 @@ public final class RequestService {
             if (user.isElder() || user.isAdmin()) {
                 ObjectNode matches = matchingService.listRecommendations(requestId);
                 item.set("matches", matches.get("data").get("matches"));
+                item.set("matchSummary", matchingService.eligibilitySummary(connection, requestId));
             }
             try (PreparedStatement statement = connection.prepareStatement("""
                     SELECT a.status, a.assigned_at, a.accepted_at, a.started_at, a.completed_at,
@@ -206,6 +214,31 @@ public final class RequestService {
             }
             return Jsons.ok(item);
         }
+    }
+
+    public ObjectNode refreshMatches(AuthUser user, UUID requestId) throws SQLException {
+        if (!user.isElder() && !user.isAdmin()) {
+            throw ApiException.forbidden("Only the elder who created this request or an administrator can refresh matches.");
+        }
+        try (Connection connection = database.connection()) {
+            connection.setAutoCommit(false);
+            try {
+                LoadedRequest loaded = load(connection, requestId);
+                authorizeView(connection, user, loaded);
+                boolean isOpen = OPEN_STATUSES.contains(loaded.status);
+                loaded.rs.close();
+                if (isOpen) {
+                    matchingService.rebuildRecommendations(connection, requestId);
+                }
+                connection.commit();
+            } catch (RuntimeException | SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        }
+        return get(user, requestId);
     }
 
     public ObjectNode cancel(AuthUser user, UUID requestId) throws SQLException {
@@ -527,6 +560,11 @@ public final class RequestService {
         item.put("preferredTimeStart", rs.getTime("preferred_time_start").toLocalTime().toString());
         item.put("preferredTimeEnd", rs.getTime("preferred_time_end").toLocalTime().toString());
         item.put("serviceAddress", volunteerView || hasColumn(rs, "service_address") ? rs.getString("service_address") : null);
+        if (hasColumn(rs, "locality")) {
+            item.put("locality", rs.getString("locality"));
+            item.put("state", rs.getString("state"));
+            item.put("pinCode", rs.getString("pin_code"));
+        }
         item.put("city", rs.getString("city"));
         item.put("priority", rs.getString("priority"));
         item.put("requiresDriving", rs.getBoolean("requires_driving"));
@@ -543,6 +581,9 @@ public final class RequestService {
         }
         if (hasColumn(rs, "total_score")) {
             item.put("matchScore", rs.getBigDecimal("total_score"));
+        }
+        if (hasColumn(rs, "eligible_volunteer_count")) {
+            item.put("eligibleVolunteerCount", rs.getInt("eligible_volunteer_count"));
         }
         return item;
     }
@@ -593,7 +634,7 @@ public final class RequestService {
     }
 
     private String defaultPriority(String priority) {
-        return priority.isBlank() ? "NORMAL" : priority.toUpperCase();
+        return priority.isBlank() ? "NORMAL" : priority.toUpperCase(Locale.ROOT);
     }
 
     private String blankToNull(String value) {

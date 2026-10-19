@@ -35,11 +35,14 @@ public final class SeedService {
                 return;
             }
         }
-        String passwordHash = Passwords.hash(config.demoPassword(), config.bcryptCost());
+        String demoPassword = config.demoPassword();
+        if (demoPassword.isBlank()) {
+            throw new IllegalStateException("Set DEMO_PASSWORD when SEED_DEMO_DATA=true.");
+        }
+        String passwordHash = Passwords.hash(demoPassword, config.bcryptCost());
         try (Connection connection = database.connection()) {
             connection.setAutoCommit(false);
             try {
-                UUID adminId = insertUser(connection, "admin@vayomitra.test", passwordHash, "ADMIN");
                 UUID elderUser = insertUser(connection, "elder@vayomitra.test", passwordHash, "ELDER");
                 UUID volunteerUser = insertUser(connection, "volunteer@vayomitra.test", passwordHash, "VOLUNTEER");
                 UUID elderId = UUID.randomUUID();
@@ -104,7 +107,7 @@ public final class SeedService {
                 };
                 for (String type : types) {
                     try (PreparedStatement statement = connection.prepareStatement(
-                            "INSERT INTO volunteer_service_preferences (volunteer_id, assistance_type) VALUES (?, ?)")) {
+                        "INSERT INTO volunteer_service_preferences (volunteer_id, assistance_type) VALUES (?, ?)")) {
                         statement.setObject(1, volunteerId);
                         statement.setString(2, type);
                         statement.executeUpdate();
@@ -126,9 +129,8 @@ public final class SeedService {
                 seedVerifiedCertificate(connection, volunteerId, "QUALIFICATION", "B.Sc. certificate");
                 seedVerifiedCertificate(connection, volunteerId, "DRIVING_LICENCE", "Driving licence");
                 connection.commit();
-                System.out.println("Seeded demo accounts (password from DEMO_PASSWORD / backend/.env.example).");
-                System.out.println("Admin user id " + adminId);
-            } catch (SQLException e) {
+                System.out.println("Seeded demo elder and volunteer accounts.");
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             } finally {

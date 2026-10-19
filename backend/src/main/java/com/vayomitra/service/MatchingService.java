@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vayomitra.config.AppConfig;
 import com.vayomitra.db.Database;
+import com.vayomitra.security.AuthUser;
 import com.vayomitra.util.Geo;
 import com.vayomitra.util.Jsons;
 
@@ -20,12 +21,15 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 public final class MatchingService {
+    private static final int MAX_RECOMMENDATIONS = 10;
     private final Database database;
     private final AppConfig config;
 
@@ -46,6 +50,9 @@ public final class MatchingService {
             eligible.add(score(request, candidate));
         }
         eligible.sort(Comparator.comparingDouble(ScoredVolunteer::totalScore).reversed());
+        if (eligible.size() > MAX_RECOMMENDATIONS) {
+            eligible = new ArrayList<>(eligible.subList(0, MAX_RECOMMENDATIONS));
+        }
         try (PreparedStatement delete = connection.prepareStatement(
                 "DELETE FROM match_recommendations WHERE request_id = ?")) {
             delete.setObject(1, requestId);
@@ -80,12 +87,19 @@ public final class MatchingService {
         }
         if (!eligible.isEmpty()) {
             try (PreparedStatement update = connection.prepareStatement("""
-                    UPDATE assistance_requests
-                    SET status = CASE WHEN status = 'PENDING' THEN 'MATCHED' ELSE status END
-                    WHERE id = ?
+                    UPDATE assistance_requests SET status = 'MATCHED'
+                    WHERE id = ? AND status = 'PENDING'
                     """)) {
                 update.setObject(1, requestId);
-                update.executeUpdate();
+                if (update.executeUpdate() > 0) {
+                    try (PreparedStatement history = connection.prepareStatement("""
+                            INSERT INTO request_status_history (request_id, old_status, new_status, note)
+                            VALUES (?, 'PENDING', 'MATCHED', 'Eligible volunteer matches generated')
+                            """)) {
+                        history.setObject(1, requestId);
+                        history.executeUpdate();
+                    }
+                }
             }
         }
         return eligible;
@@ -94,9 +108,11 @@ public final class MatchingService {
     public ObjectNode listRecommendations(UUID requestId) throws SQLException {
         try (Connection connection = database.connection();
              PreparedStatement statement = connection.prepareStatement("""
-                     SELECT m.*, v.full_name, v.city, v.experience_years, v.educational_qualification, v.skills
+                    SELECT m.*, v.full_name, v.phone, u.email, v.city,
+                        v.experience_years, v.educational_qualification, v.skills
                      FROM match_recommendations m
                      JOIN volunteers v ON v.id = m.volunteer_id
+                    JOIN users u ON u.id = v.user_id AND u.account_status = 'ACTIVE'
                      WHERE m.request_id = ?
                      ORDER BY m.rank_position ASC
                      """)) {
@@ -107,6 +123,8 @@ public final class MatchingService {
                     ObjectNode item = Jsons.object();
                     item.put("volunteerId", rs.getObject("volunteer_id", UUID.class).toString());
                     item.put("fullName", rs.getString("full_name"));
+                    item.put("phone", rs.getString("phone"));
+                    item.put("email", rs.getString("email"));
                     item.put("city", rs.getString("city"));
                     item.put("experienceYears", rs.getInt("experience_years"));
                     item.put("educationalQualification", rs.getString("educational_qualification"));
@@ -135,6 +153,86 @@ public final class MatchingService {
             data.put("availabilityWeight", config.availabilityWeight());
             data.put("qualificationWeight", config.qualificationWeight());
             return Jsons.ok(data);
+        }
+    }
+
+    public ObjectNode eligibilitySummary(Connection connection, UUID requestId) throws SQLException {
+        RequestSnapshot request = loadRequest(connection, requestId);
+        List<Candidate> candidates = loadCandidates(connection, request.assistanceType);
+        Map<String, Integer> excluded = new LinkedHashMap<>();
+        int eligibleCount = 0;
+        for (Candidate candidate : candidates) {
+            Exclusion reason = exclude(connection, request, candidate);
+            if (reason == null) {
+                eligibleCount++;
+            } else {
+                excluded.merge(reason.reason, 1, Integer::sum);
+            }
+        }
+        ObjectNode summary = Jsons.object();
+        summary.put("candidateCount", candidates.size());
+        summary.put("eligibleCount", eligibleCount);
+        summary.put("shownCount", Math.min(eligibleCount, MAX_RECOMMENDATIONS));
+        ObjectNode reasons = Jsons.object();
+        excluded.forEach(reasons::put);
+        summary.set("excludedByReason", reasons);
+        return summary;
+    }
+
+    public ObjectNode volunteerReadiness(AuthUser user) throws SQLException {
+        if (!user.isVolunteer()) {
+            throw com.vayomitra.util.ApiException.forbidden("Only volunteers can view volunteer matching readiness.");
+        }
+        try (Connection connection = database.connection();
+             PreparedStatement profile = connection.prepareStatement("""
+                     SELECT id, offers_driving, driving_licence_expiry
+                     FROM volunteers WHERE user_id = ?
+                     """)) {
+            profile.setObject(1, user.userId());
+            try (ResultSet rs = profile.executeQuery()) {
+                if (!rs.next()) {
+                    throw com.vayomitra.util.ApiException.forbidden("Volunteer profile not found.");
+                }
+                UUID volunteerId = rs.getObject("id", UUID.class);
+                boolean offersDriving = rs.getBoolean("offers_driving");
+                Date licenceExpiry = rs.getDate("driving_licence_expiry");
+                Set<String> verifiedCertificates = new java.util.HashSet<>();
+                try (PreparedStatement certificates = connection.prepareStatement("""
+                        SELECT certificate_type FROM volunteer_certificates
+                        WHERE volunteer_id = ? AND verification_status = 'VERIFIED'
+                        """)) {
+                    certificates.setObject(1, volunteerId);
+                    try (ResultSet certificateRows = certificates.executeQuery()) {
+                        while (certificateRows.next()) {
+                            verifiedCertificates.add(certificateRows.getString("certificate_type"));
+                        }
+                    }
+                }
+                ObjectNode readiness = Jsons.object();
+                readiness.put("tenthCertificateVerified", verifiedCertificates.contains("TENTH_STANDARD"));
+                readiness.put("qualificationCertificateVerified", verifiedCertificates.contains("QUALIFICATION"));
+                readiness.put("mandatoryCertificatesVerified", verifiedCertificates.contains("TENTH_STANDARD")
+                        && verifiedCertificates.contains("QUALIFICATION"));
+                readiness.put("offersDriving", offersDriving);
+                readiness.put("drivingLicenceVerified", verifiedCertificates.contains("DRIVING_LICENCE"));
+                readiness.put("drivingLicenceExpired", licenceExpiry != null
+                        && licenceExpiry.toLocalDate().isBefore(LocalDate.now()));
+                readiness.put("healthcareCertificateVerified", verifiedCertificates.contains("HEALTHCARE"));
+                readiness.put("firstAidCertificateVerified", verifiedCertificates.contains("FIRST_AID"));
+                ArrayNode types = readiness.putArray("assistanceTypes");
+                try (PreparedStatement preferences = connection.prepareStatement("""
+                        SELECT assistance_type FROM volunteer_service_preferences
+                        WHERE volunteer_id = ? ORDER BY assistance_type
+                        """)) {
+                    preferences.setObject(1, volunteerId);
+                    try (ResultSet preferenceRows = preferences.executeQuery()) {
+                        while (preferenceRows.next()) {
+                            types.add(preferenceRows.getString("assistance_type"));
+                        }
+                    }
+                }
+                return Jsons.ok(readiness);
+            }
         }
     }
 

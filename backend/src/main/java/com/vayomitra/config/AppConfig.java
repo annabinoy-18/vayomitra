@@ -60,7 +60,7 @@ public final class AppConfig {
     }
 
     public String frontendOrigin() {
-        return get("FRONTEND_ORIGIN", "http://localhost:5173");
+        return get("FRONTEND_ORIGIN", "http://localhost:5174");
     }
 
     public int tokenExpiryHours() {
@@ -108,11 +108,11 @@ public final class AppConfig {
     }
 
     public boolean seedDemoData() {
-        return Boolean.parseBoolean(get("SEED_DEMO_DATA", "true"));
+        return Boolean.parseBoolean(get("SEED_DEMO_DATA", "false"));
     }
 
     public String demoPassword() {
-        return get("DEMO_PASSWORD", "Demo@12345");
+        return get("DEMO_PASSWORD", "");
     }
 
     public String get(String key, String fallback) {
