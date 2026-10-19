@@ -45,7 +45,7 @@ export default function ElderDashboard() {
       <section className="hero">
         <h1>Namaste{user?.fullName ? `, ${user.fullName}` : ""}</h1>
         <p className="muted">Create a request and Vayomitra will rank eligible volunteers.</p>
-        <div className="actions"><Link className="btn" to="/elder/requests/new">Ask for help</Link></div>
+        <div className="actions"><Link className="btn" to="/elder/requests/new">Make a request</Link></div>
       </section>
       <Alert type="error">{error}</Alert>
       <section className="dashboard-section">
