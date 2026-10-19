@@ -299,16 +299,11 @@ export async function getRequest(requestId, userRole) {
     .maybeSingle();
 
   if (asg) {
-    const { data: vol } = await supabase
-      .from("volunteers")
-      .select("full_name, phone, city")
-      .eq("id", asg.volunteer_id)
-      .maybeSingle();
     request.assignment = {
       status: asg.status,
-      volunteerName: vol?.full_name || "Unknown",
-      volunteerPhone: vol?.phone,
-      volunteerCity: vol?.city,
+      volunteerName: asg.volunteer_name || "Unknown",
+      volunteerPhone: asg.volunteer_phone,
+      volunteerCity: null,
     };
   } else {
     request.assignment = null;
@@ -321,41 +316,26 @@ export async function getRequest(requestId, userRole) {
       .eq("request_id", requestId)
       .order("rank_position", { ascending: true });
 
-    const enrichedMatches = await Promise.all(
-      (matches || []).map(async (m) => {
-        const { data: vol } = await supabase
-          .from("volunteers")
-          .select("full_name, phone, city, experience_years, educational_qualification, skills, user_id")
-          .eq("id", m.volunteer_id)
-          .maybeSingle();
-        const { data: volUser } = await supabase
-          .from("profiles")
-          .select("email")
-          .eq("id", vol?.user_id)
-          .maybeSingle();
-        return {
-          volunteerId: m.volunteer_id,
-          fullName: vol?.full_name || "Unknown",
-          phone: vol?.phone,
-          email: volUser?.email,
-          city: vol?.city,
-          experienceYears: vol?.experience_years || 0,
-          educationalQualification: vol?.educational_qualification || "",
-          skills: vol?.skills || "",
-          totalScore: Number(m.total_score),
-          skillScore: Number(m.skill_score),
-          distanceScore: Number(m.distance_score),
-          availabilityScore: Number(m.availability_score),
-          qualificationScore: Number(m.qualification_score),
-          distanceKm: m.distance_km != null ? Number(m.distance_km) : null,
-          explanation: m.explanation,
-          missingInformation: m.missing_information,
-          rank: m.rank_position,
-        };
-      })
-    );
-    request.matches = enrichedMatches;
-    request.matchSummary = { eligibleCount: enrichedMatches.length, candidateCount: enrichedMatches.length };
+    request.matches = (matches || []).map((m) => ({
+      volunteerId: m.volunteer_id,
+      fullName: m.volunteer_name || "Unknown",
+      phone: m.volunteer_phone,
+      email: m.volunteer_email,
+      city: m.volunteer_city,
+      experienceYears: m.volunteer_experience_years || 0,
+      educationalQualification: m.volunteer_educational_qualification || "",
+      skills: m.volunteer_skills || "",
+      totalScore: Number(m.total_score),
+      skillScore: Number(m.skill_score),
+      distanceScore: Number(m.distance_score),
+      availabilityScore: Number(m.availability_score),
+      qualificationScore: Number(m.qualification_score),
+      distanceKm: m.distance_km != null ? Number(m.distance_km) : null,
+      explanation: m.explanation,
+      missingInformation: m.missing_information,
+      rank: m.rank_position,
+    }));
+    request.matchSummary = { eligibleCount: request.matches.length, candidateCount: request.matches.length };
   }
 
   return request;
@@ -470,18 +450,14 @@ export async function assignVolunteer(requestId, volunteerId) {
   if (!req || !["PENDING", "MATCHED"].includes(req.status))
     throw new Error("This request is no longer open for assignment.");
 
-  const { error } = await supabase.from("volunteer_assignments").insert({
-    request_id: requestId,
-    volunteer_id: volunteerId,
-    status: "ASSIGNED",
+  const { error } = await supabase.rpc("assign_volunteer", {
+    p_request_id: requestId,
+    p_volunteer_id: volunteerId,
   });
   if (error) {
     if (error.code === "23505") throw new Error("This request already has a volunteer assigned.");
     throw new Error(error.message);
   }
-
-  await supabase.from("assistance_requests").update({ status: "ASSIGNED" }).eq("id", requestId);
-  await insertHistory(requestId, req.status, "ASSIGNED", "Volunteer assigned");
 }
 
 export async function applyToRequest(requestId, volunteerId) {
