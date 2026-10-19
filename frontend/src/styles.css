@@ -1138,8 +1138,6 @@ h3 {
   flex-wrap: wrap;
   gap: 10px;
 }
-=======
-}
 
 .home-navbar {
   display: flex;
@@ -2221,7 +2219,8 @@ input[type="checkbox"] {
   min-width: 0;
   flex-direction: column;
   gap: 7px;
-=======
+}
+
 .elder-registration-page .registration-login a:hover {
   text-decoration: underline;
 }
@@ -2325,7 +2324,8 @@ input[type="file"] {
 .request-form-page {
   width: min(100%, 900px);
   margin: 28px auto;
-=======
+}
+
 .volunteer-registration-page input:not([type="checkbox"]):not([type="file"]),
 .volunteer-registration-page select,
 .volunteer-registration-page textarea {
