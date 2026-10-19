@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api, openAuthenticatedFile } from "../api/client.js";
+import { listAdminDocuments, reviewDocument, openDocumentFile } from "../api/client.js";
 import { Alert } from "../components/FormBits.jsx";
 
 export default function AdminPage() {
@@ -9,42 +9,28 @@ export default function AdminPage() {
   const [reviewing, setReviewing] = useState("");
 
   async function load() {
-    setError("");
-    setLoading(true);
+    setError(""); setLoading(true);
     try {
-      const data = await api("/api/admin/documents");
+      const data = await listAdminDocuments();
       setDocuments(data.documents || []);
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (item) { setError(item.message); }
+    finally { setLoading(false); }
   }
+  useEffect(() => { load(); }, []);
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  async function review(id, status) {
-    setError("");
-    setReviewing(id);
+  async function review(doc, status) {
+    setError(""); setReviewing(doc.documentId);
     try {
-      await api(`/api/admin/documents/${id}/review`, { method: "POST", body: { status, notes: "Reviewed by an administrator." } });
+      await reviewDocument(doc.documentId, status, doc.ownerType);
       await load();
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setReviewing("");
-    }
+    } catch (item) { setError(item.message); }
+    finally { setReviewing(""); }
   }
 
-  async function viewFile(id) {
+  async function viewFile(doc) {
     setError("");
-    try {
-      await openAuthenticatedFile(`/api/documents/${id}/file`);
-    } catch (item) {
-      setError(item.message);
-    }
+    try { await openDocumentFile(doc.documentId, doc.ownerType); }
+    catch (item) { setError(item.message); }
   }
 
   return (
@@ -57,9 +43,9 @@ export default function AdminPage() {
           <h3>{doc.ownerType === "ELDER" ? "Elder" : "Volunteer"}: {doc.volunteerName}</h3>
           <p>{doc.volunteerEmail} · {doc.documentType} · {doc.originalFilename}</p>
           <div className="actions">
-            <button className="btn ghost" onClick={() => viewFile(doc.documentId)}>View file</button>
-            <button className="btn" disabled={reviewing === doc.documentId} onClick={() => review(doc.documentId, "VERIFIED")}>Verify</button>
-            <button className="btn danger" disabled={reviewing === doc.documentId} onClick={() => review(doc.documentId, "REJECTED")}>Reject</button>
+            <button className="btn ghost" onClick={() => viewFile(doc)}>View file</button>
+            <button className="btn" disabled={reviewing === doc.documentId} onClick={() => review(doc, "VERIFIED")}>Verify</button>
+            <button className="btn danger" disabled={reviewing === doc.documentId} onClick={() => review(doc, "REJECTED")}>Reject</button>
           </div>
         </article>
       ))}

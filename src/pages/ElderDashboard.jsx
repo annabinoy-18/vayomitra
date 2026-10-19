@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api/client.js";
+import { listElderRequests, listElderDocuments, uploadElderDocument } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { Alert } from "../components/FormBits.jsx";
 
@@ -14,56 +14,38 @@ export default function ElderDashboard() {
   const [uploading, setUploading] = useState(false);
 
   async function load() {
-    setError("");
-    setLoading(true);
+    setError(""); setLoading(true);
     try {
-      const [requestList, documentList] = await Promise.all([
-        api("/api/requests"),
-        api("/api/elders/me/documents")
-      ]);
-      setRequests(requestList);
-      setDocuments(documentList);
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setLoading(false);
-    }
+      const [requestList, documentList] = await Promise.all([listElderRequests(), listElderDocuments()]);
+      setRequests(requestList); setDocuments(documentList);
+    } catch (item) { setError(item.message); }
+    finally { setLoading(false); }
   }
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
   async function uploadProof(event) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    setError("");
-    setMessage("");
-    setUploading(true);
+    const formEl = event.currentTarget;
+    setError(""); setMessage(""); setUploading(true);
     try {
-      await api("/api/elders/me/documents", {
-        method: "POST",
-        body: new FormData(formElement),
-        isForm: true
-      });
-      formElement.reset();
+      const formData = new FormData(formEl);
+      const documentType = formData.get("documentType");
+      const file = formData.get("file");
+      await uploadElderDocument(documentType, file);
+      formEl.reset();
       setMessage("Identity document uploaded for verification.");
       await load();
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setUploading(false);
-    }
+    } catch (item) { setError(item.message); }
+    finally { setUploading(false); }
   }
 
   return (
     <>
       <section className="hero">
         <h1>Namaste{user?.fullName ? `, ${user.fullName}` : ""}</h1>
-        <p className="muted">Create a request and Vayomitra will rank eligible volunteers on the server.</p>
-        <div className="actions">
-          <Link className="btn" to="/elder/requests/new">Ask for help</Link>
-        </div>
+        <p className="muted">Create a request and Vayomitra will rank eligible volunteers.</p>
+        <div className="actions"><Link className="btn" to="/elder/requests/new">Ask for help</Link></div>
       </section>
       <Alert type="error">{error}</Alert>
       <section className="dashboard-section">
@@ -90,21 +72,14 @@ export default function ElderDashboard() {
         <Alert type="ok">{message}</Alert>
         <form onSubmit={uploadProof} className="grid two">
           <label>Document type
-            <select name="documentType">
-              <option value="IDENTITY_PROOF">Identity proof</option>
-              <option value="OTHER">Other supporting document</option>
-            </select>
+            <select name="documentType"><option value="IDENTITY_PROOF">Identity proof</option><option value="OTHER">Other supporting document</option></select>
           </label>
-          <label>File
-            <input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png" required />
-          </label>
+          <label>File<input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png" required /></label>
           <button className="btn" type="submit" disabled={uploading}>{uploading ? "Uploading..." : "Upload document"}</button>
         </form>
         <div className="grid">
           {documents.map((document) => (
-            <p key={document.documentId}>
-              <span className="badge">{document.verificationStatus}</span> {document.documentType} — {document.originalFilename}
-            </p>
+            <p key={document.documentId}><span className="badge">{document.verificationStatus}</span> {document.documentType} — {document.originalFilename}</p>
           ))}
         </div>
       </section>

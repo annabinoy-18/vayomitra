@@ -99,7 +99,7 @@ export default function App() {
         </Routes>
         {!isHome ? (
           <footer>
-            Vayomitra keeps passwords hashed, documents off the public frontend folder, and matching rules in the Java API.
+            Vayomitra keeps passwords secure, documents in private storage, and matching in your browser.
           </footer>
         ) : null}
       </main>

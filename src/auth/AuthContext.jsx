@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { api, getToken, setToken } from "../api/client.js";
+import { supabase } from "../lib/supabase.js";
+import { loadProfile } from "../api/client.js";
 
 const AuthContext = createContext(null);
 
@@ -7,21 +8,18 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  async function refresh({ throwOnError = false } = {}) {
-    if (!getToken()) {
+  async function refresh() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
       setUser(null);
       setLoading(false);
       return;
     }
     try {
-      const me = await api("/api/auth/me");
-      setUser(me);
-    } catch (error) {
-      setToken(null);
+      const profile = await loadProfile(session.user.id);
+      setUser(profile);
+    } catch {
       setUser(null);
-      if (throwOnError) {
-        throw error;
-      }
     } finally {
       setLoading(false);
     }
@@ -29,37 +27,42 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     refresh();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      (async () => {
+        if (!session) {
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        try {
+          const profile = await loadProfile(session.user.id);
+          setUser(profile);
+        } catch {
+          setUser(null);
+        } finally {
+          setLoading(false);
+        }
+      })();
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   const value = useMemo(
     () => ({
       user,
       loading,
-      async login(email, password, role) {
-        const data = await api("/api/auth/login", {
-          method: "POST",
-          body: { email, password, role }
-        });
-        setToken(data.token);
-        try {
-          await refresh({ throwOnError: true });
-        } catch (error) {
-          setToken(null);
-          setUser(null);
-          throw error;
-        }
-        return data;
+      async login(email, password) {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw new Error(error.message);
+        const profile = await loadProfile(data.user.id);
+        setUser(profile);
+        return profile;
       },
       async logout() {
-        try {
-          await api("/api/auth/logout", { method: "POST" });
-        } catch {
-          /* still clear local state */
-        }
-        setToken(null);
+        await supabase.auth.signOut();
         setUser(null);
       },
-      refresh
+      refresh,
     }),
     [user, loading]
   );

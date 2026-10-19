@@ -1,6 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api/client.js";
+import {
+  listVolunteerAvailableRequests,
+  listVolunteerAssignments,
+  listVolunteerDocuments,
+  getVolunteerReadiness,
+  uploadVolunteerDocument,
+  applyToRequest,
+  transitionAssignment,
+  listVolunteerAvailability,
+  addVolunteerAvailability,
+  removeVolunteerAvailability,
+} from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { Alert } from "../components/FormBits.jsx";
 
@@ -15,76 +26,76 @@ export default function VolunteerDashboard() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [workingOn, setWorkingOn] = useState("");
+  const [availability, setAvailability] = useState([]);
+  const [newAvail, setNewAvail] = useState({ weekday: 1, startTime: "09:00", endTime: "17:00" });
 
   async function load() {
-    setError("");
-    setLoading(true);
+    setError(""); setLoading(true);
     try {
-      const [requestList, assignmentList, documentList, profileReadiness] = await Promise.all([
-        api("/api/requests"),
-        api("/api/requests?scope=assignments"),
-        api("/api/volunteers/me/documents"),
-        api("/api/volunteers/me/matching-readiness")
+      const [requestList, assignmentList, documentList, profileReadiness, availList] = await Promise.all([
+        listVolunteerAvailableRequests(),
+        listVolunteerAssignments(),
+        listVolunteerDocuments(),
+        getVolunteerReadiness(),
+        listVolunteerAvailability(),
       ]);
-      setAvailable(requestList);
-      setAssignments(assignmentList);
-      setDocuments(documentList);
-      setReadiness(profileReadiness);
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setLoading(false);
-    }
+      setAvailable(requestList); setAssignments(assignmentList);
+      setDocuments(documentList); setReadiness(profileReadiness);
+      setAvailability(availList);
+    } catch (item) { setError(item.message); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function addAvailability() {
+    setError(""); setMessage("");
+    try {
+      await addVolunteerAvailability(Number(newAvail.weekday), newAvail.startTime, newAvail.endTime);
+      setMessage("Availability slot added.");
+      await load();
+    } catch (item) { setError(item.message); }
   }
 
-  useEffect(() => {
-    load();
-  }, []);
+  async function removeAvailability(id) {
+    setError("");
+    try {
+      await removeVolunteerAvailability(id);
+      await load();
+    } catch (item) { setError(item.message); }
+  }
 
   async function upload(event) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    setError("");
-    setMessage("");
-    setUploading(true);
+    const formEl = event.currentTarget;
+    setError(""); setMessage(""); setUploading(true);
     try {
-      await api("/api/volunteers/me/documents", { method: "POST", body: new FormData(formElement), isForm: true });
-      formElement.reset();
+      const formData = new FormData(formEl);
+      await uploadVolunteerDocument(formData.get("documentType"), formData.get("file"));
+      formEl.reset();
       setMessage("Document uploaded and waiting for verification.");
       await load();
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setUploading(false);
-    }
+    } catch (item) { setError(item.message); }
+    finally { setUploading(false); }
   }
 
   async function apply(id) {
-    setError("");
-    setWorkingOn(id);
+    setError(""); setWorkingOn(id);
     try {
-      await api(`/api/requests/${id}/apply`, { method: "POST" });
+      await applyToRequest(id, user.volunteerId);
       setMessage("Request accepted and added to your assignments.");
       await load();
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setWorkingOn("");
-    }
+    } catch (item) { setError(item.message); }
+    finally { setWorkingOn(""); }
   }
 
   async function act(id, action) {
-    setError("");
-    setWorkingOn(id);
+    setError(""); setWorkingOn(id);
     try {
-      await api(`/api/requests/${id}/${action}`, { method: "POST" });
+      await transitionAssignment(id, action);
       setMessage("Assignment updated.");
       await load();
-    } catch (item) {
-      setError(item.message);
-    } finally {
-      setWorkingOn("");
-    }
+    } catch (item) { setError(item.message); }
+    finally { setWorkingOn(""); }
   }
 
   return (
@@ -149,6 +160,28 @@ export default function VolunteerDashboard() {
         ) : loading ? <p className="muted">Checking your verification status...</p> : null}
       </section>
       <section className="dashboard-section">
+        <h2>Your weekly availability</h2>
+        <p className="muted">Add time slots so the matching system knows when you can help. Without any availability, you will not appear in request matches.</p>
+        <div className="grid two">
+          <label>Day<select value={newAvail.weekday} onChange={(e) => setNewAvail({ ...newAvail, weekday: e.target.value })}>
+            <option value={1}>Monday</option><option value={2}>Tuesday</option><option value={3}>Wednesday</option>
+            <option value={4}>Thursday</option><option value={5}>Friday</option><option value={6}>Saturday</option><option value={7}>Sunday</option>
+          </select></label>
+          <label>Start time<input type="time" value={newAvail.startTime} onChange={(e) => setNewAvail({ ...newAvail, startTime: e.target.value })} /></label>
+          <label>End time<input type="time" value={newAvail.endTime} onChange={(e) => setNewAvail({ ...newAvail, endTime: e.target.value })} /></label>
+          <button className="btn" type="button" onClick={addAvailability}>Add slot</button>
+        </div>
+        <div className="grid">
+          {!loading && availability.length === 0 ? <p className="muted">No availability set yet.</p> : null}
+          {availability.map((a) => (
+            <p key={a.id}>
+              {["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][a.weekday]} {a.startTime}–{a.endTime}
+              <button className="link" onClick={() => removeAvailability(a.id)}>Remove</button>
+            </p>
+          ))}
+        </div>
+      </section>
+      <section className="dashboard-section">
         <h2>Documents</h2>
         <form onSubmit={upload} className="grid two">
           <label>Document type
@@ -161,9 +194,7 @@ export default function VolunteerDashboard() {
               <option value="OTHER">Other supporting document</option>
             </select>
           </label>
-          <label>File
-            <input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png" required />
-          </label>
+          <label>File<input name="file" type="file" accept=".pdf,.jpg,.jpeg,.png" required /></label>
           <button className="btn" type="submit" disabled={uploading}>{uploading ? "Uploading..." : "Upload"}</button>
         </form>
         <div className="grid">
@@ -177,9 +208,7 @@ export default function VolunteerDashboard() {
         <h2>Available requests</h2>
         {loading ? <p className="muted">Loading requests...</p> : null}
         {!loading && !error && available.length === 0 ? (
-          <p className="muted">
-            No requests match your current verified services, availability, assignment capacity, and service area. Check the eligibility status above and your selected services below.
-          </p>
+          <p className="muted">No requests match your current verified services, availability, assignment capacity, and service area. Check the eligibility status above and your selected services below.</p>
         ) : null}
         {available.map((request) => (
           <article className="request-card" key={request.id}>

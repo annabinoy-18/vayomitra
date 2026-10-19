@@ -17,7 +17,7 @@ export default function LoginPage() {
     form.setBusy(true);
     form.setError("");
     try {
-      const data = await auth.login(form.values.email, form.values.password, form.values.role);
+      const data = await auth.login(form.values.email, form.values.password);
       const requestedPath = location.state?.from?.pathname;
       const permittedPrefix = data.role === "ELDER" ? "/elder"
         : data.role === "VOLUNTEER" ? "/volunteer"
