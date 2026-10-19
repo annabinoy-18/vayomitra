@@ -114,16 +114,13 @@ export default function VolunteerRegisterPage() {
           <Field label="Skills" error={form.errors.skills}><textarea name="skills" rows={4} placeholder="Describe your skills and areas of experience" value={form.values.skills} onChange={form.onChange} required /></Field>
         </section>
         <section className="registration-section">
-          <h2>Certificates</h2>
-          <p className="registration-section-description">Upload your 10th-standard, qualification, and any required driving-licence documents from your volunteer dashboard after registration. Accepted formats: PDF, JPG, and PNG.</p>
-        </section>
-        <section className="registration-section">
           <h2>Service Preferences</h2>
-          <p className="registration-section-description">Tell us how much experience you have and how far you can travel.</p>
+          <p className="registration-section-description">Tell us how much experience you have and how far you can travel to help.</p>
           <div className="grid two registration-grid">
             <Field label="Experience (years)" error={form.errors.experienceYears}><input name="experienceYears" type="number" min="0" value={form.values.experienceYears} onChange={form.onChange} /></Field>
             <Field label="Preferred service radius (km)" error={form.errors.preferredServiceRadiusKm}><input name="preferredServiceRadiusKm" type="number" min="1" value={form.values.preferredServiceRadiusKm} onChange={form.onChange} /></Field>
           </div>
+          <p className="registration-help">You can upload your 10th-standard, qualification, and any required driving-licence certificates (PDF, JPG, or PNG) from your volunteer dashboard after registration. Verification is required before you appear in request matches.</p>
         </section>
         <section className="registration-section">
           <h2>Assistance Types</h2>
